@@ -1,0 +1,1 @@
+i've installed openai==0.28 , scikit-learn , rank-bm25 , python-docx
