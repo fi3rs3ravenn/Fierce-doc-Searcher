@@ -2,8 +2,22 @@ import os
 from rank_bm25 import BM25Okapi
 import docx 
 import openai
+import nltk
+from nltk.corpus import stopwords
+import pymorphy2
 
-openai.api_key = "my own api key"
+openai.api_key = ""
+
+nltk.download('stopwords')
+stop_words = set(stopwords.words('russian'))
+
+morph = pymorphy2.MorphAnalyzer()
+
+def preprocess_text(text):
+    words = text.split()
+    lemmas = [morph.parse(word)[0].normal_form for word in words if word.lower() not in stop_words]
+    return lemmas
+
 
 def load_docs(folder_path='base of doc'):
     docs = {}
@@ -19,12 +33,12 @@ def extract_text_from_docx(file_path):
     return text 
 
 def index_doc(documents):
-    tokenized_docs = [doc.split() for doc in documents.values()]
+    tokenized_docs = [preprocess_text(doc) for doc in documents.values()]
     bm25 = BM25Okapi(tokenized_docs)
     return bm25 , tokenized_docs
 
 def searc_docs(query , docs, bm25, top_n=3):
-    tokenized_query = query.split()
+    tokenized_query = preprocess_text(query)
     scores = bm25.get_scores(tokenized_query)
     best_match_index = scores.argsort()[-top_n:][::-1]  
     
