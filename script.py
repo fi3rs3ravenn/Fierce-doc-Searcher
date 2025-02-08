@@ -15,9 +15,8 @@ morph = pymorphy2.MorphAnalyzer()
 
 def preprocess_text(text):
     words = text.split()
-    lemmas = [morph.parse(word)[0].normal_form for word in words if word.lower() not in stop_words]
+    lemmas = [morph.parse(word.lower())[0].normal_form for word in words if word.lower() not in stop_words]
     return lemmas
-
 
 def load_docs(folder_path='base of doc'):
     docs = {}
@@ -41,39 +40,44 @@ def searc_docs(query , docs, bm25, top_n=3):
     tokenized_query = preprocess_text(query)
     scores = bm25.get_scores(tokenized_query)
     best_match_index = scores.argsort()[-top_n:][::-1]  
-    
-    results = []
-    for idx in best_match_index:
-        best_doc_name = list(docs.keys())[idx]
-        best_doc_text = list(docs.values())[idx]
-        results.append((best_doc_name, best_doc_text))
 
+    doc_names, doc_texts = zip(*docs.items())
+
+    results = [(doc_names[idx], doc_texts[idx]) for idx in best_match_index]
     return results
+
+def split_text(text, chunk_size=1500):
+    words = text.split()
+    return [' '.join(words[i:i + chunk_size]) for i in range(0, len(words), chunk_size)]
 
 def analyze_gpt(query , top_docs):
     refined_results = []
     for doc_name , doc_text in top_docs:
-        prompt = f"""
-        I have text of law:
-        {doc_text[:2000]}
-        Customer have a question: '{query}'
-        Give an answer according to text of doc.
-        """
-        try:
-            response = openai.ChatCompletion.create(
-                model='gpt-3.5-turbo',
-                messages=[
-                    {'role':'system' , 'content':'you are a helper in searching and analyzing docs'},
-                    {'role':'user' , 'content':prompt}
-                ]
-            )
-            gpt_answer = response['choices'][0]['message']['content']
-            refined_results.append((doc_name, gpt_answer))
-        except Exception as e:
-            refined_results.append((doc_name, f'Error {e}'))
-        
-        if len(refined_results) == 3:
-            break
+        text_chunks = split_text(doc_text)
+        full_answer = ""
+
+        for chunk in text_chunks:
+            prompt = f"""
+            I have text of law:
+            {chunk}
+            Customer has a question: '{query}'
+            Give an answer according to text of doc.
+            """
+            try:
+                response = openai.ChatCompletion.create(
+                    model='gpt-3.5-turbo',
+                    messages=[
+                        {'role':'system' , 'content':'you are a helper in searching and analyzing docs'},
+                        {'role':'user' , 'content':prompt}
+                    ]
+                )
+                gpt_answer = response['choices'][0]['message']['content']
+                full_answer += " " + gpt_answer
+            except Exception as e:
+                full_answer += f" Error: {e}"
+
+        refined_results.append((doc_name, full_answer))
+    
     return refined_results
 
 if __name__ == '__main__':
@@ -100,4 +104,3 @@ if __name__ == '__main__':
                 print(f'AI answer --> {gpt_answer}')
         else:
             print('there is no docs')
-    
