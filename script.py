@@ -5,8 +5,11 @@ import openai
 import nltk
 from nltk.corpus import stopwords
 import pymorphy2
+import sqlite3
 
 openai.api_key = ""
+
+DB_NAME = 'docs.db'
 
 nltk.download('stopwords')
 stop_words = set(stopwords.words('russian'))
@@ -18,12 +21,13 @@ def preprocess_text(text):
     lemmas = [morph.parse(word.lower())[0].normal_form for word in words if word.lower() not in stop_words]
     return lemmas
 
-def load_docs(folder_path='base of doc'):
-    docs = {}
-    for filename in os.listdir(folder_path):
-        if filename.endswith('.docx'):
-            file_path = os.path.join(folder_path, filename)
-            docs[filename] = extract_text_from_docx(file_path)
+
+def load_docs():
+    conn = sqlite3.connect(DB_NAME)
+    cursor = conn.cursor()
+    cursor.execute('SELECT filename, content FROM docs')
+    docs = {row[0]: row[1] for row in cursor.fetchall()}
+    conn.close()
     return docs
 
 def extract_text_from_docx(file_path):
@@ -32,16 +36,19 @@ def extract_text_from_docx(file_path):
     return text 
 
 def index_doc(documents):
-    tokenized_docs = [preprocess_text(doc) for doc in documents.values()]
+    tokenized_docs = [preprocess_text(doc) for doc in documents.values() if doc]
     bm25 = BM25Okapi(tokenized_docs)
-    return bm25 , tokenized_docs
+    return bm25, tokenized_docs
 
-def searc_docs(query , docs, bm25, top_n=3):
+def searc_docs(query, docs, bm25, top_n=3):
+    if not docs:
+        return []
+
     tokenized_query = preprocess_text(query)
     scores = bm25.get_scores(tokenized_query)
     best_match_index = scores.argsort()[-top_n:][::-1]  
 
-    doc_names, doc_texts = zip(*docs.items())
+    doc_names, doc_texts = zip(*docs.items()) if docs else ([], [])
 
     results = [(doc_names[idx], doc_texts[idx]) for idx in best_match_index]
     return results
