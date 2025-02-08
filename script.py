@@ -4,36 +4,30 @@ import docx
 import openai
 import nltk
 from nltk.corpus import stopwords
-import pymorphy2
+import pymorphy3
 import sqlite3
 
-openai.api_key = ""
-
+openai.api_key = "my api"
 DB_NAME = 'docs.db'
 
 nltk.download('stopwords')
+nltk.download('punkt')  
 stop_words = set(stopwords.words('russian'))
 
-morph = pymorphy2.MorphAnalyzer()
+morph = pymorphy3.MorphAnalyzer()
 
 def preprocess_text(text):
     words = text.split()
     lemmas = [morph.parse(word.lower())[0].normal_form for word in words if word.lower() not in stop_words]
     return lemmas
 
-
-def load_docs():
+def load_docs_from_db():
     conn = sqlite3.connect(DB_NAME)
     cursor = conn.cursor()
     cursor.execute('SELECT filename, content FROM docs')
-    docs = {row[0]: row[1] for row in cursor.fetchall()}
+    docs = {row[0]: row[1] for row in cursor.fetchall() if row[1]} 
     conn.close()
     return docs
-
-def extract_text_from_docx(file_path):
-    doc = docx.Document(file_path)
-    text = '\n'.join([para.text for para in doc.paragraphs if para.text.strip() != ''])
-    return text 
 
 def index_doc(documents):
     tokenized_docs = [preprocess_text(doc) for doc in documents.values() if doc]
@@ -45,12 +39,16 @@ def searc_docs(query, docs, bm25, top_n=3):
         return []
 
     tokenized_query = preprocess_text(query)
+    
+    if not tokenized_query:  
+        return []
+
     scores = bm25.get_scores(tokenized_query)
-    best_match_index = scores.argsort()[-top_n:][::-1]  
+    if not any(scores):  
+        return []
 
-    doc_names, doc_texts = zip(*docs.items()) if docs else ([], [])
-
-    results = [(doc_names[idx], doc_texts[idx]) for idx in best_match_index]
+    best_match_index = scores.argsort()[-top_n:][::-1]
+    results = [(list(docs.keys())[idx], list(docs.values())[idx]) for idx in best_match_index]
     return results
 
 def split_text(text, chunk_size=1500):
@@ -88,16 +86,16 @@ def analyze_gpt(query , top_docs):
     return refined_results
 
 if __name__ == '__main__':
-    print('loading docs...')
-    docs = load_docs()
-    print(f'loaded {len(docs)}')
+    print('Loading documents from database...')
+    docs = load_docs_from_db()
+    print(f'Loaded {len(docs)} documents.')
 
-    print('indexation of docs...')
+    print('Indexing documents...')
     bm25, tokenized_docs = index_doc(docs)
-    print('The end of indexation')
+    print('Indexing completed.')
 
     while True:
-        user_query = input('Enter the law name (or / to exit) :  ')
+        user_query = input('Enter the law name (or / to exit): ')
         if user_query == '/':
             break 
 
@@ -105,9 +103,9 @@ if __name__ == '__main__':
         refined_results = analyze_gpt(user_query, top_docs)
 
         if refined_results:
-            print('\n The most relevant docs:')
+            print('\nThe most relevant docs:')
             for i , (doc_name, gpt_answer) in enumerate(refined_results, 1):
                 print(f'\n Doc {i} --> {doc_name}')
-                print(f'AI answer --> {gpt_answer}')
+                print(f'AI answer --> {gpt_answer[:500]}...')  
         else:
-            print('there is no docs')
+            print('No relevant documents found.')
