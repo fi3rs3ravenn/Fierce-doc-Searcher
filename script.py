@@ -7,7 +7,8 @@ from nltk.corpus import stopwords
 import pymorphy3
 import sqlite3
 
-openai.api_key = "my api"
+openai.api_key = ""
+
 DB_NAME = 'docs.db'
 
 nltk.download('stopwords')
@@ -24,13 +25,21 @@ def preprocess_text(text):
 def load_docs_from_db():
     conn = sqlite3.connect(DB_NAME)
     cursor = conn.cursor()
-    cursor.execute('SELECT filename, content FROM docs')
-    docs = {row[0]: row[1] for row in cursor.fetchall() if row[1]} 
+    cursor.execute('SELECT filename, content, summary FROM docs')
+    docs = {}
+    for row in cursor.fetchall():
+        filename = row[0]
+        content = row[1] if row[1] else ''
+        summary = row[2] if row[2] else ''
+        docs[filename] = {'content': content , 'summary':summary}
     conn.close()
     return docs
 
 def index_doc(documents):
-    tokenized_docs = [preprocess_text(doc) for doc in documents.values() if doc]
+    tokenized_docs = []
+    for doc in documents.values():
+        text_for_index = doc['summary'] if doc['summary'] else doc['content']
+        tokenized_docs.append(preprocess_text(text_for_index))
     bm25 = BM25Okapi(tokenized_docs)
     return bm25, tokenized_docs
 
@@ -39,7 +48,6 @@ def searc_docs(query, docs, bm25, top_n=3):
         return []
 
     tokenized_query = preprocess_text(query)
-    
     if not tokenized_query:  
         return []
 
@@ -48,7 +56,8 @@ def searc_docs(query, docs, bm25, top_n=3):
         return []
 
     best_match_index = scores.argsort()[-top_n:][::-1]
-    results = [(list(docs.keys())[idx], list(docs.values())[idx]) for idx in best_match_index]
+    doc_keys = list(docs.keys())
+    results = [(doc_keys[idx], docs[doc_keys[idx]]) for idx in best_match_index]
     return results
 
 def split_text(text, chunk_size=1500):
@@ -57,8 +66,9 @@ def split_text(text, chunk_size=1500):
 
 def analyze_gpt(query , top_docs):
     refined_results = []
-    for doc_name , doc_text in top_docs:
-        text_chunks = split_text(doc_text)
+    for doc_name , doc_data in top_docs:
+        text_to_analyze = doc_data.get('summary') if doc_data.get('summary') else doc_data.get('content')
+        text_chunks = split_text(text_to_analyze)
         full_answer = ""
 
         for chunk in text_chunks:
